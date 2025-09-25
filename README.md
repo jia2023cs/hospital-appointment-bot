@@ -9,9 +9,7 @@ AI-powered medical appointment booking system using voice calls.
 - Patient information recording in Google Sheets
 - Twilio phone system integration
 
-## Quick Deployment
-
-### Railway (Recommended)
+### Railway 
 
 1. **Connect to Railway**
    - Go to [railway.app](https://railway.app)
