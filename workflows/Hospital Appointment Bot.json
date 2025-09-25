@@ -1,0 +1,422 @@
+{
+  "name": "Hospital Appointment Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/appointment-call",
+        "responseMode": "lastNode",
+        "options": {
+          "binaryPropertyName": "audio"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -416,
+        -128
+      ],
+      "id": "d7414bfc-cd55-4120-897a-ea884b769515",
+      "name": "Webhook",
+      "webhookId": "e32d7ccc-9be5-429c-9a87-f0d0ab831e29"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "audio0",
+        "options": {
+          "language": "",
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -192,
+        -128
+      ],
+      "id": "3e1d3230-c3b7-4700-9acf-3ae9cb8974bd",
+      "name": "Transcribe a recording",
+      "credentials": {
+        "openAiApi": {
+          "id": "vVydhbj3i1XagZPn",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Transcribe a recording').item.json.text }}",
+        "options": {
+          "systemMessage": "=  You are a medical appointment booking assistant. Collect patient info and book appointments efficiently.\n\n  ====================================================================\n  REQUIRED INFO (collect all 5):\n  1. Patient Name  2. Phone  3. Doctor Name  4. Insurance Number  5. Appointment Reason\n  ====================================================================\n\n  DOCTOR CONSTRAINTS:\n  - Dr. Jing: Monday-Friday, 9AM-5PM, 30-minute slots\n  - Slots: 9:00, 9:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00, 13:30, 14:00, 14:30, 15:00, 15:30,\n  16:00, 16:30\n\n  ====================================================================\n  STRICT WORKFLOW - FOLLOW EXACTLY:\n\n  1. Collect all 5 info pieces (no tools)\n     - If any information is missing, ask patient for all missing pieces at once\n     - Only proceed to step 2 when all 5 pieces are complete\n\n  2. Ask patient to confirm the 5 pieces of information:\n     \"I have your information: Name: [Name], Phone: [Phone], Doctor: Dr. Jing, Insurance: [Insurance], Reason:\n  [Reason].\n     Are all these details correct? Please say 'Yes, all information are correct' or 'No, [specify which item\n  needs to be changed]'\"\n     - If patient says \"Yes, all information are correct\" → proceed to step 3\n     - If patient says \"No\" → ask which information needs to be changed, update it, then repeat step 2\n     - Keep repeating until patient says \"Yes, all information are correct\"\n\n  3. ONLY after patient confirms \"Yes, all information are correct\" → use Check_Doctor_Schedule tool\n     - Use ONLY Check_Doctor_Schedule tool to read existing appointments\n     - DO NOT use Book_Appointment tool at step 3\n     - DO NOT use Record_Patient_Info tool at step 3\n\n  4. Find first available slot AFTER current time that has NO existing events\n     - Check each time slot for ANY existing events\n     - If time slot has ANY event → skip to next time slot\n     - Only suggest time slots with ZERO events\n     \n  5. Suggest the time to patient with two clear options:\n     \n     \"I have [time] available on [date]. Please choose:\n     Option 1: 'Yes, Book it' - to confirm this appointment\n     Option 2: 'No, I want another time' - to see different options\"\n\n  6. Wait for patient response:\n     - If patient says \"Yes, Book it\" → proceed to step 7\n     - If patient says \"No, I want another time\" → ask \"Which date would you prefer?\"\n       → Use Check_Doctor_Schedule for that date → Find earliest available conflict-free time\n       → Repeat step 5 with new suggested time\n     - Keep repeating until patient says \"Yes, Book it\"\n\n  7. ONLY when patient says \"Yes, Book it\" → use Book_Appointment + Record_Patient_Info tools\n     - First: Use Book_Appointment tool to create calendar event\n     - Second: Use Record_Patient_Info tool to add to sheets\n     - Confirm to patient: \"Your appointment is booked for [time] on [date]\"\n\n  ====================================================================\n  TOOL USAGE - SPECIFIC NAMES:\n  - Step 3 & 6: Use \"Check_Doctor_Schedule\" tool ONLY to read existing appointments\n  - Step 7: Use \"Book_Appointment\" tool to create calendar event\n  - Step 7: Use \"Record_Patient_Info\" tool to save patient data\n  - All steps: Use \"Simple Memory\" to store conversation state\n\n  TOOL RESTRICTIONS:\n  - Steps 1-6: NO \"Book_Appointment\" or \"Record_Patient_Info\" tools allowed\n  - Step 3 & 6: ONLY \"Check_Doctor_Schedule\" tool allowed\n  - Step 7: \"Book_Appointment\" + \"Record_Patient_Info\" ONLY after \"Yes, Book it\"\n\n  ====================================================================\n  FORBIDDEN ACTIONS:\n  - NEVER use Book_Appointment or Record_Patient_Info tools at steps 1-6\n  - NEVER auto-book without explicit \"Yes, Book it\"\n  - NEVER suggest time slots that have ANY existing events\n\n  ====================================================================\n  CONFLICT DETECTION:\n  In step 4, confirm that a time slot has NO existing events before suggesting it to patient.\n\n  TOOL DATA FORMATS:\n\n  Check_Doctor_Schedule (step 3 & 6 only):\n  {\n    \"timeMin\": \"2025-MM-DDTHH:MM:SS\",\n    \"timeMax\": \"2025-MM-DDTHH:MM:SS\"\n  }\n\n  Book_Appointment (only when patient says \"Yes, Book it\"):\n  {\n    \"summary\": \"[Patient Name] - [Appointment Reason] with Dr. Jing\",\n    \"start\": {\"dateTime\": \"2025-MM-DDTHH:MM:SS\"},\n    \"end\": {\"dateTime\": \"2025-MM-DDTHH:MM:SS\"}\n  }\n\n  Record_Patient_Info (only after Book_Appointment success):\n  {\n    \"Patient Name\": \"[Patient Name]\",\n    \"Contact Info\": \"[Phone]\",\n    \"Doctor Name\": \"Dr. Jing\",\n    \"Insurance Number\": \"[Insurance]\",\n    \"Appointment Reason\": \"[Reason]\",\n    \"Appointment Date\": \"2025-MM-DD HH:MM\"\n  }\n\n  MEMORY STRUCTURE:\n  {\n    \"state\": \"collecting/confirming_info/checking/suggesting/waiting_booking_decision/confirmed\",\n    \"appointmentCreated\": false,\n    \"suggestedDateTime\": null,\n    \"patientInfo\": {...}\n  }\n\n  REAL-TIME CONTEXT:\n  - Current date and time: {{ $now.toFormat('yyyy-MM-dd HH:mm') }}\n  - Only suggest appointments AFTER current time\n  - If current hour >= 17, suggest next business day\n\n  Current state: {{$memory.conversationState}}\n  Info: {{$memory.patientInfo}}\n  Real-time: {{ $now.toFormat('yyyy-MM-dd HH:mm EEEE') }}\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        112,
+        -128
+      ],
+      "id": "0a7421df-8160-4e23-8a11-d36f6b1adf99",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        32,
+        112
+      ],
+      "id": "8a620298-de3c-4551-97df-49c0961ed05e",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "vVydhbj3i1XagZPn",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ \"call_\" + $json.CallSid }}",
+        "contextWindowLength": 15
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        208,
+        112
+      ],
+      "id": "18b9dd9d-130b-4031-bae5-7cb658538d11",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "77ca4634cd9ae92f4d3417bee54c2796112219ae6484eff50fcd98ae9ca8591b@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Dr.Jing"
+        },
+        "limit": 3,
+        "timeMin": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('After', ``, 'string') }}",
+        "timeMax": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Before', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        384,
+        112
+      ],
+      "id": "a29915eb-b41b-4667-83a8-2f2d11711703",
+      "name": "Check_Doctor_Schedule",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "Dc3GSTZJz1t6LbEQ",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "77ca4634cd9ae92f4d3417bee54c2796112219ae6484eff50fcd98ae9ca8591b@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Dr.Jing"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', ``, 'string') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', ``, 'string') }}",
+        "additionalFields": {
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Summary', `Add a Summary of the calendar event using patient name + reason + Doctor name.`, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        560,
+        112
+      ],
+      "id": "0364db5e-4e4d-485a-a486-75eda4198d73",
+      "name": "Book_Appointment",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "Dc3GSTZJz1t6LbEQ",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "=1tlqr1HSUzUEMWWCGNYrVZ9X_EScBdtrKlOFv40RHOd0",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "appointments",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1tlqr1HSUzUEMWWCGNYrVZ9X_EScBdtrKlOFv40RHOd0/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Patient Name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Patient_Name', ``, 'string') }}",
+            "Contact Info": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Contact_Info', ``, 'string') }}",
+            "Doctor Name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Doctor_Name', ``, 'string') }}",
+            "Insurance Number": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Insurance_Number', ``, 'string') }}",
+            "Appointment Reason": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Appointment_Reason', ``, 'string') }}",
+            "Appointment Date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Appointment_Date', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Patient Name",
+              "displayName": "Patient Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Contact Info",
+              "displayName": "Contact Info",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Doctor Name",
+              "displayName": "Doctor Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Insurance Number",
+              "displayName": "Insurance Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Appointment Reason",
+              "displayName": "Appointment Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Appointment Date",
+              "displayName": "Appointment Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        736,
+        112
+      ],
+      "id": "af079426-b812-4759-b021-76fb4edfda2e",
+      "name": "Record_Patient_Info",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GjFPMrUWGGwpcm57",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/speech",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "YOUR_OPENAI_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "tts-1"
+            },
+            {
+              "name": "input",
+              "value": "={{ $('AI Agent').item.json.output }}"
+            },
+            {
+              "name": "voice",
+              "value": "alloy"
+            },
+            {
+              "name": "response_format",
+              "value": "mp3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        592,
+        -128
+      ],
+      "id": "bbeaee71-49f3-42c4-b335-2c7c158744c8",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Transcribe a recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe a recording": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check_Doctor_Schedule": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Book_Appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record_Patient_Info": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0a483592-e563-4ecd-99b4-3549b6613b2c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f22e06d492a540bb63ba09193918ccb7c3e7475e93f127838d5b9a73a4ca63e0"
+  },
+  "id": "yZVm5O5itf9I0dQH",
+  "tags": []
+}
